@@ -1,6 +1,10 @@
-# aux4
+<p align="center">
+  <img src="logo.png" alt="aux4" width="200">
+</p>
 
-GitHub Action to lint, test, and publish [aux4](https://aux4.io) packages.
+<h1 align="center">aux4</h1>
+
+<p align="center">GitHub Action to lint, test, and publish <a href="https://aux4.io">aux4</a> packages.</p>
 
 ## Usage
 
