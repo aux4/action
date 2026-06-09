@@ -103,6 +103,16 @@ These inputs work with all commands:
 | `packages` | Space-separated aux4 packages to install | |
 | `build_command` | Build command to run before the action | |
 
+## Recommended Pipeline
+
+```
+lint → test-linux ─┐
+                    ├→ publish
+lint → test-darwin ─┘
+```
+
+Lint runs first. Tests only start if lint passes (in parallel across platforms). Publish only after all checks succeed.
+
 ## Full Workflow Example
 
 ```yaml
@@ -110,15 +120,26 @@ name: Publish Package
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+    paths:
+      - '**'
+      - '!.github/**'
+      - '!README.md'
+      - '!LICENSE'
+      - '!.gitignore'
+
   workflow_dispatch:
     inputs:
       level:
-        description: 'Release level'
+        description: 'Release level (patch, minor, major)'
         required: true
         default: 'patch'
         type: choice
-        options: [patch, minor, major]
+        options:
+          - patch
+          - minor
+          - major
 
 concurrency:
   group: publish-package
@@ -132,27 +153,80 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
       - uses: aux4/action@v1
         with:
           command: lint
           strict: 'true'
 
-  test:
+  test-linux:
+    needs: [lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
       - uses: aux4/action@v1
         with:
           command: test
-          build_command: 'npm run build'
+          build_command: npm run build
+
+  test-darwin:
+    needs: [lint]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - uses: aux4/action@v1
+        with:
+          command: test
+          build_command: npm run build
 
   publish:
-    needs: [lint, test]
+    needs: [test-linux, test-darwin]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
       - uses: aux4/action@v1
         with:
           command: publish
