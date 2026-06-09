@@ -1,0 +1,395 @@
+name: 'aux4'
+description: 'Lint, test, and publish aux4 packages'
+author: 'aux4'
+
+branding:
+  icon: 'terminal'
+  color: 'blue'
+
+inputs:
+  command:
+    description: 'Command to run: lint, test, or publish'
+    required: true
+
+  # Common
+  working_directory:
+    description: 'Working directory containing the repository'
+    required: false
+    default: '.'
+  package_directory:
+    description: 'Directory containing the package .aux4 file'
+    required: false
+    default: 'package'
+  system_packages:
+    description: 'Space-separated list of system packages to install (apt/brew)'
+    required: false
+    default: ''
+  npm_packages:
+    description: 'Space-separated list of global npm packages to install'
+    required: false
+    default: ''
+  packages:
+    description: 'Space-separated list of aux4 packages to install'
+    required: false
+    default: ''
+  build_command:
+    description: 'Command to build the package (e.g., npm run build, aux4 builder linux)'
+    required: false
+    default: ''
+
+  # Lint
+  strict:
+    description: '[lint] Strict mode — treats -local versions as errors'
+    required: false
+    default: 'false'
+  resolve:
+    description: '[lint] Resolve mode — validates aux4 command calls against installed packages'
+    required: false
+    default: 'false'
+  format:
+    description: '[lint] Output format (text or json)'
+    required: false
+    default: 'text'
+
+  # Test
+  test_directory:
+    description: '[test] Directory containing the test files'
+    required: false
+    default: 'test'
+
+  # Publish
+  level:
+    description: '[publish] Release level (patch, minor, major)'
+    required: false
+    default: 'patch'
+  aux4_token:
+    description: '[publish] aux4 access token for publishing to hub.aux4.io'
+    required: false
+    default: ''
+  github_token:
+    description: '[publish] GitHub token for creating releases'
+    required: false
+    default: ''
+  aux4_image:
+    description: '[publish] Docker image for aux4'
+    required: false
+    default: 'aux4/aux4:latest'
+
+outputs:
+  version:
+    description: 'The new package version (publish only)'
+    value: ${{ steps.version.outputs.version }}
+  scope:
+    description: 'The package scope (publish only)'
+    value: ${{ steps.version.outputs.scope }}
+  name:
+    description: 'The package name (publish only)'
+    value: ${{ steps.version.outputs.name }}
+
+runs:
+  using: 'composite'
+  steps:
+    # ── Setup ──────────────────────────────────────────────
+
+    - name: Install aux4
+      shell: bash
+      run: |
+        if command -v aux4 &>/dev/null; then
+          echo "aux4 already installed"
+          exit 0
+        fi
+        curl -fsSL https://aux4.sh | sh
+        echo "$HOME/.aux4.config/packages/aux4/aux4" >> $GITHUB_PATH
+
+    - name: Install pkger
+      shell: bash
+      run: |
+        if aux4 aux4 pkger list &>/dev/null; then
+          echo "pkger already installed"
+          exit 0
+        fi
+        curl -fsSL https://pkger.aux4.sh | sh
+
+    - name: Install system packages
+      if: inputs.system_packages != ''
+      shell: bash
+      run: |
+        for pkg in ${{ inputs.system_packages }}; do
+          echo "Installing system package: $pkg"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get install -y "$pkg"
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install "$pkg"
+          else
+            echo "::warning::Unsupported OS for system packages: $RUNNER_OS"
+          fi
+        done
+
+    - name: Install npm packages
+      if: inputs.npm_packages != ''
+      shell: bash
+      run: |
+        for pkg in ${{ inputs.npm_packages }}; do
+          echo "Installing npm package: $pkg"
+          npm i -g "$pkg"
+        done
+
+    - name: Install aux4 packages
+      if: inputs.packages != ''
+      shell: bash
+      run: |
+        for pkg in ${{ inputs.packages }}; do
+          echo "Installing aux4 package: $pkg"
+          aux4 aux4 pkger install "$pkg"
+        done
+
+    - name: Build package
+      if: inputs.build_command != ''
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        echo "Building: ${{ inputs.build_command }}"
+        ${{ inputs.build_command }}
+
+    # ── Lint ───────────────────────────────────────────────
+
+    - name: Install aux4/lint
+      if: inputs.command == 'lint'
+      shell: bash
+      run: |
+        aux4 aux4 pkger install aux4/lint
+
+    - name: Run linter
+      if: inputs.command == 'lint'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        echo "Linting .aux4 files in ${{ inputs.package_directory }}"
+        aux4 lint run \
+          --dir "${{ inputs.package_directory }}" \
+          --format "${{ inputs.format }}" \
+          --strict "${{ inputs.strict }}" \
+          --resolve "${{ inputs.resolve }}"
+
+    # ── Test ───────────────────────────────────────────────
+
+    - name: Install jest
+      if: inputs.command == 'test'
+      shell: bash
+      run: |
+        npm i -g jest
+
+    - name: Install aux4/test
+      if: inputs.command == 'test'
+      shell: bash
+      run: |
+        aux4 aux4 pkger install aux4/test
+
+    - name: Package and install for testing
+      if: inputs.command == 'test'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}/${{ inputs.package_directory }}
+      run: |
+        if [ ! -f ".aux4" ]; then
+          echo "::error::Package metadata not found at .aux4"
+          exit 1
+        fi
+
+        SCOPE=$(jq -r '.scope' ".aux4")
+        NAME=$(jq -r '.name' ".aux4")
+        VERSION=$(jq -r '.version' ".aux4")
+
+        echo "Packaging ${SCOPE}/${NAME}@${VERSION}"
+        aux4 aux4 pkger build .
+
+        PACKAGE_FILE="${SCOPE}_${NAME}_${VERSION}.zip"
+        if [ ! -f "$PACKAGE_FILE" ]; then
+          echo "::error::Package file not found: ${PACKAGE_FILE}"
+          exit 1
+        fi
+
+        echo "Installing package from ${PACKAGE_FILE}"
+        aux4 aux4 pkger install --fromFile "$PACKAGE_FILE"
+
+    - name: Run tests
+      if: inputs.command == 'test'
+      shell: bash
+      run: |
+        PACKAGE_AUX4="${{ inputs.working_directory }}/${{ inputs.package_directory }}/.aux4"
+        SCOPE=$(jq -r '.scope' "$PACKAGE_AUX4")
+        NAME=$(jq -r '.name' "$PACKAGE_AUX4")
+
+        TEST_DIR="$HOME/.aux4.config/packages/${SCOPE}/${NAME}/${{ inputs.test_directory }}"
+        if [ ! -d "$TEST_DIR" ]; then
+          echo "::error::Test directory not found at ${TEST_DIR}"
+          exit 1
+        fi
+
+        echo "Running tests from ${TEST_DIR}"
+        cd "$TEST_DIR"
+        aux4 test run
+
+    # ── Publish ────────────────────────────────────────────
+
+    - name: Configure git
+      if: inputs.command == 'publish'
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Pull latest changes
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        git pull --rebase origin ${{ github.ref_name }}
+
+    - name: Get current package info
+      if: inputs.command == 'publish'
+      id: current
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        PACKAGE_AUX4="${{ inputs.package_directory }}/.aux4"
+        if [ ! -f "$PACKAGE_AUX4" ]; then
+          echo "::error::Package metadata not found at ${PACKAGE_AUX4}"
+          exit 1
+        fi
+        SCOPE=$(jq -r '.scope' "$PACKAGE_AUX4")
+        NAME=$(jq -r '.name' "$PACKAGE_AUX4")
+        CURRENT_VERSION=$(jq -r '.version' "$PACKAGE_AUX4")
+        echo "scope=${SCOPE}" >> $GITHUB_OUTPUT
+        echo "name=${NAME}" >> $GITHUB_OUTPUT
+        echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
+        echo "::notice::Found package ${SCOPE}/${NAME} at version ${CURRENT_VERSION}"
+
+    - name: Increment version
+      if: inputs.command == 'publish'
+      id: version
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        PACKAGE_AUX4="${{ inputs.package_directory }}/.aux4"
+        CURRENT_VERSION="${{ steps.current.outputs.current_version }}"
+        LEVEL="${{ inputs.level }}"
+
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+
+        case "$LEVEL" in
+          major)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+          minor)
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+          patch)
+            PATCH=$((PATCH + 1))
+            ;;
+        esac
+
+        NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "scope=${{ steps.current.outputs.scope }}" >> $GITHUB_OUTPUT
+        echo "name=${{ steps.current.outputs.name }}" >> $GITHUB_OUTPUT
+
+        jq --arg v "$NEW_VERSION" '.version = $v' "$PACKAGE_AUX4" > "${PACKAGE_AUX4}.tmp" && mv "${PACKAGE_AUX4}.tmp" "$PACKAGE_AUX4"
+
+        echo "::notice::Version bumped from ${CURRENT_VERSION} to ${NEW_VERSION}"
+
+    - name: Pull latest aux4 image
+      if: inputs.command == 'publish'
+      shell: bash
+      run: |
+        docker pull ${{ inputs.aux4_image }}
+
+    - name: Build package for publishing
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        docker run --rm \
+          --user $(id -u):$(id -g) \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          ${{ inputs.aux4_image }} \
+          aux4 pkger build ${{ inputs.package_directory }}
+
+    - name: Publish to hub.aux4.io
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        AUX4_ACCESS_TOKEN: ${{ inputs.aux4_token }}
+      run: |
+        SCOPE="${{ steps.current.outputs.scope }}"
+        NAME="${{ steps.current.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        PACKAGE_FILE="${SCOPE}_${NAME}_${VERSION}.zip"
+
+        AUX4_ACCESS_TOKEN=$(echo -n "$AUX4_ACCESS_TOKEN" | tr -d '[:space:]')
+
+        docker run --rm \
+          --user $(id -u):$(id -g) \
+          -v $(pwd):/workspace \
+          -w /workspace \
+          -e AUX4_ACCESS_TOKEN="${AUX4_ACCESS_TOKEN}" \
+          --entrypoint sh \
+          ${{ inputs.aux4_image }} \
+          -c 'aux4 aux4 pkger publish "'"${PACKAGE_FILE}"'"'
+
+    - name: Commit and tag
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        PACKAGE_AUX4="${{ inputs.package_directory }}/.aux4"
+
+        git add "$PACKAGE_AUX4"
+        git commit -m "release: ${VERSION}"
+        git tag -a "v${VERSION}" -m "release: v${VERSION}"
+
+    - name: Push changes and tags
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        git push origin ${{ github.ref_name }}
+        git push origin --tags
+
+    - name: Create GitHub Release
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github_token }}
+      run: |
+        SCOPE="${{ steps.current.outputs.scope }}"
+        NAME="${{ steps.current.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        PACKAGE_FILE="${SCOPE}_${NAME}_${VERSION}.zip"
+
+        if [ -f "${PACKAGE_FILE}" ]; then
+          gh release create "v${VERSION}" \
+            "${PACKAGE_FILE}" \
+            --title "Release v${VERSION}" \
+            --notes "Release of ${SCOPE}/${NAME} v${VERSION}"
+        else
+          gh release create "v${VERSION}" \
+            --title "Release v${VERSION}" \
+            --notes "Release of ${SCOPE}/${NAME} v${VERSION}"
+        fi
+
+    - name: Cleanup
+      if: inputs.command == 'publish'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        SCOPE="${{ steps.current.outputs.scope }}"
+        NAME="${{ steps.current.outputs.name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        rm -f "${SCOPE}_${NAME}_${VERSION}.zip"
