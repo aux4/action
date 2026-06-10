@@ -229,23 +229,16 @@ runs:
           exit 1
         fi
 
-        echo "Running tests from ${TEST_DIR}"
         cd "$TEST_DIR"
-        aux4 test run
+        THRESHOLD="${{ inputs.coverage_threshold }}"
 
-    - name: Check coverage
-      if: inputs.command == 'test' && inputs.coverage_threshold != '0'
-      shell: bash
-      run: |
-        PACKAGE_AUX4="${{ inputs.working_directory }}/${{ inputs.package_directory }}/.aux4"
-        SCOPE=$(jq -r '.scope' "$PACKAGE_AUX4")
-        NAME=$(jq -r '.name' "$PACKAGE_AUX4")
-
-        TEST_DIR="$HOME/.aux4.config/packages/${SCOPE}/${NAME}/${{ inputs.test_directory }}"
-        cd "$TEST_DIR"
-
-        echo "Running coverage (threshold: ${{ inputs.coverage_threshold }}%)"
-        aux4 test coverage --threshold "${{ inputs.coverage_threshold }}"
+        if [ "$THRESHOLD" != "0" ] && [ -n "$THRESHOLD" ]; then
+          echo "Running tests with coverage (threshold: ${THRESHOLD}%)"
+          aux4 test coverage --threshold "$THRESHOLD"
+        else
+          echo "Running tests"
+          aux4 test run
+        fi
 
     # ── Publish ────────────────────────────────────────────
 
