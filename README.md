@@ -47,19 +47,27 @@ Validates `.aux4` configuration files for structural correctness, naming convent
 
 ### test
 
-Runs tests for an aux4 package using the `aux4/test` framework.
+Runs tests for an aux4 package using the `aux4/test` framework. Optionally enforces a coverage threshold.
 
 ```yaml
 - uses: aux4/action@v1
   with:
     command: test
     build_command: 'npm run build'
+    coverage_threshold: '80'
 ```
 
 | Input | Description | Default |
 |-------|-------------|---------|
 | `test_directory` | Directory containing test files | `test` |
 | `build_command` | Build command to run before testing | |
+| `coverage_threshold` | Minimum step coverage % (0-100). Fails if below. `0` disables. | `0` |
+
+When `coverage_threshold` is set to a value greater than `0`, the action runs a separate coverage step after the tests pass. If coverage is below the threshold, the step fails with:
+
+```
+Coverage 50% is below threshold 80%
+```
 
 ### publish
 

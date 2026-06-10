@@ -56,6 +56,10 @@ inputs:
     description: '[test] Directory containing the test files'
     required: false
     default: 'test'
+  coverage_threshold:
+    description: '[test] Minimum step coverage percentage (0-100). Fails if below. Set to 0 to disable.'
+    required: false
+    default: '0'
 
   # Publish
   level:
@@ -228,6 +232,20 @@ runs:
         echo "Running tests from ${TEST_DIR}"
         cd "$TEST_DIR"
         aux4 test run
+
+    - name: Check coverage
+      if: inputs.command == 'test' && inputs.coverage_threshold != '0'
+      shell: bash
+      run: |
+        PACKAGE_AUX4="${{ inputs.working_directory }}/${{ inputs.package_directory }}/.aux4"
+        SCOPE=$(jq -r '.scope' "$PACKAGE_AUX4")
+        NAME=$(jq -r '.name' "$PACKAGE_AUX4")
+
+        TEST_DIR="$HOME/.aux4.config/packages/${SCOPE}/${NAME}/${{ inputs.test_directory }}"
+        cd "$TEST_DIR"
+
+        echo "Running coverage (threshold: ${{ inputs.coverage_threshold }}%)"
+        aux4 test coverage --threshold "${{ inputs.coverage_threshold }}"
 
     # ── Publish ────────────────────────────────────────────
 
