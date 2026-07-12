@@ -270,10 +270,12 @@ runs:
         SCOPE=$(jq -r '.scope' "$PACKAGE_AUX4")
         NAME=$(jq -r '.name' "$PACKAGE_AUX4")
         CURRENT_VERSION=$(jq -r '.version' "$PACKAGE_AUX4")
+        PRIVATE=$(jq -r '.private // false' "$PACKAGE_AUX4")
         echo "scope=${SCOPE}" >> $GITHUB_OUTPUT
         echo "name=${NAME}" >> $GITHUB_OUTPUT
         echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
-        echo "::notice::Found package ${SCOPE}/${NAME} at version ${CURRENT_VERSION}"
+        echo "private=${PRIVATE}" >> $GITHUB_OUTPUT
+        echo "::notice::Found package ${SCOPE}/${NAME} at version ${CURRENT_VERSION} (private: ${PRIVATE})"
 
     - name: Increment version
       if: inputs.command == 'publish'
@@ -343,6 +345,13 @@ runs:
 
         AUX4_ACCESS_TOKEN=$(echo -n "$AUX4_ACCESS_TOKEN" | tr -d '[:space:]')
 
+        # Route private packages to the "private" repository (pkger defaults to "public")
+        REPO_ARG=""
+        if [ "${{ steps.current.outputs.private }}" = "true" ]; then
+          REPO_ARG="--repository private "
+          echo "::notice::Publishing ${SCOPE}/${NAME} to the PRIVATE repository"
+        fi
+
         docker run --rm \
           --user $(id -u):$(id -g) \
           -v $(pwd):/workspace \
@@ -350,7 +359,7 @@ runs:
           -e AUX4_ACCESS_TOKEN="${AUX4_ACCESS_TOKEN}" \
           --entrypoint sh \
           ${{ inputs.aux4_image }} \
-          -c 'aux4 aux4 pkger publish "'"${PACKAGE_FILE}"'"'
+          -c "aux4 aux4 pkger publish ${REPO_ARG}\"${PACKAGE_FILE}\""
 
     - name: Commit and tag
       if: inputs.command == 'publish'
