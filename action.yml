@@ -114,6 +114,37 @@ runs:
         fi
         curl -fsSL https://pkger.aux4.sh | sh
 
+    - name: Register a system package provider
+      shell: bash
+      run: |
+        # pkger resolves a package's OWN declared system dependencies (e.g. aux4/browser
+        # needs chromium) through an installer provider. With none registered it fails with
+        # "No package manager available". Pick the provider that matches whatever package
+        # manager this runner actually has, rather than assuming one per OS.
+        # Native manager first: GitHub's ubuntu images also ship Homebrew, and picking brew
+        # there would install through the wrong one.
+        if command -v apt-get >/dev/null 2>&1; then
+          PROVIDER=apt
+        elif command -v dnf >/dev/null 2>&1; then
+          PROVIDER=dnf
+        elif command -v yum >/dev/null 2>&1; then
+          PROVIDER=yum
+        elif command -v apk >/dev/null 2>&1; then
+          PROVIDER=apk
+        elif command -v brew >/dev/null 2>&1; then
+          PROVIDER=brew
+        else
+          echo "::warning::No system package manager found; packages with system dependencies will fail to install"
+          exit 0
+        fi
+
+        if aux4 aux4 pkger list 2>/dev/null | grep -q "system-installer-${PROVIDER}"; then
+          echo "system-installer-${PROVIDER} already installed"
+        else
+          echo "Registering system package provider: ${PROVIDER}"
+          aux4 aux4 pkger install "aux4/system-installer-${PROVIDER}"
+        fi
+
     - name: Install system packages
       if: inputs.system_packages != ''
       shell: bash
