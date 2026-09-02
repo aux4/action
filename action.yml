@@ -1,5 +1,5 @@
 name: 'aux4'
-description: 'Lint, test, and publish aux4 packages'
+description: 'Lint, test, publish, and cloud-deploy aux4 packages'
 author: 'aux4'
 
 branding:
@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: lint, test, or publish'
+    description: 'Command to run: lint, test, publish, or cloud-deploy'
     required: true
 
   # Common
@@ -78,6 +78,56 @@ inputs:
     description: '[publish] Docker image for aux4'
     required: false
     default: 'aux4/aux4:latest'
+
+  # Cloud Deploy
+  scope:
+    description: '[cloud-deploy] Target scope for the deployment'
+    required: false
+    default: ''
+  machine:
+    description: '[cloud-deploy] Machine (VM) name — the deployment identity; defaults to the package name for a single package'
+    required: false
+    default: ''
+  deploy_packages:
+    description: '[cloud-deploy] Packages to deploy, one per line: [<repository>:]<scope>/<name>[@<version>] (repository defaults to public; prefix private: or system:)'
+    required: false
+    default: ''
+  version:
+    description: '[cloud-deploy] Default version for packages given without @version'
+    required: false
+    default: 'latest'
+  size:
+    description: '[cloud-deploy] Machine size: xs, sm, md, lg, xl'
+    required: false
+    default: 'sm'
+  timeout:
+    description: '[cloud-deploy] Lambda timeout in seconds'
+    required: false
+    default: '120'
+  api:
+    description: '[cloud-deploy] Deploy as an HTTP API behind an API Gateway (requires exactly one package)'
+    required: false
+    default: 'false'
+  env:
+    description: '[cloud-deploy] Environment variables to set on the machine, one NAME=value per line'
+    required: false
+    default: ''
+  api_url:
+    description: '[cloud-deploy] Cloud API base URL'
+    required: false
+    default: 'https://api.aux4.cloud'
+  client_id:
+    description: '[cloud-deploy] OAuth client id to mint a token via the client_credentials grant (see README — cloud:deploy machine tokens are not accepted by the cloud API yet)'
+    required: false
+    default: ''
+  client_secret:
+    description: '[cloud-deploy] OAuth client secret used with client_id for client_credentials'
+    required: false
+    default: ''
+  sso_url:
+    description: '[cloud-deploy] SSO base URL used to mint a token when client_id/client_secret are provided'
+    required: false
+    default: 'https://sso.aux4.io'
 
 outputs:
   version:
@@ -444,3 +494,115 @@ runs:
         NAME="${{ steps.current.outputs.name }}"
         VERSION="${{ steps.version.outputs.version }}"
         rm -f "${SCOPE}_${NAME}_${VERSION}.zip"
+
+    # ── Cloud Deploy ───────────────────────────────────────
+
+    - name: Install aux4/cloud
+      if: inputs.command == 'cloud-deploy'
+      shell: bash
+      run: |
+        aux4 aux4 pkger install aux4/cloud
+
+    - name: Establish authentication
+      if: inputs.command == 'cloud-deploy'
+      shell: bash
+      env:
+        AUX4_TOKEN: ${{ inputs.aux4_token }}
+        CLIENT_ID: ${{ inputs.client_id }}
+        CLIENT_SECRET: ${{ inputs.client_secret }}
+        SSO_URL: ${{ inputs.sso_url }}
+      run: |
+        set -euo pipefail
+
+        TOKEN=""
+        if [ -n "$CLIENT_ID" ] && [ -n "$CLIENT_SECRET" ]; then
+          echo "Minting an access token via the client_credentials grant..."
+          TOKEN=$(curl -sf -u "$CLIENT_ID:$CLIENT_SECRET" \
+            -d grant_type=client_credentials \
+            -d scope=cloud:deploy \
+            "${SSO_URL%/}/token" | jq -r '.access_token // empty')
+          if [ -z "$TOKEN" ]; then
+            echo "::error::Failed to mint an access token from ${SSO_URL%/}/token. Verify client_id/client_secret and that the client is granted the 'cloud:deploy' scope."
+            exit 1
+          fi
+        elif [ -n "$AUX4_TOKEN" ]; then
+          echo "Using the provided aux4_token."
+          TOKEN="$AUX4_TOKEN"
+        else
+          echo "::error::No credentials provided. Supply either 'aux4_token' or both 'client_id' and 'client_secret'."
+          exit 1
+        fi
+
+        TOKEN=$(printf '%s' "$TOKEN" | tr -d '[:space:]')
+        echo "::add-mask::$TOKEN"
+        echo "AUX4_ACCESS_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+    - name: Deploy to aux4.cloud
+      if: inputs.command == 'cloud-deploy'
+      shell: bash
+      env:
+        DEPLOY_SCOPE: ${{ inputs.scope }}
+        DEPLOY_NAME: ${{ inputs.machine }}
+        DEPLOY_PACKAGES: ${{ inputs.deploy_packages }}
+        DEPLOY_VERSION: ${{ inputs.version }}
+        DEPLOY_SIZE: ${{ inputs.size }}
+        DEPLOY_TIMEOUT: ${{ inputs.timeout }}
+        DEPLOY_API: ${{ inputs.api }}
+        DEPLOY_ENV: ${{ inputs.env }}
+        DEPLOY_API_URL: ${{ inputs.api_url }}
+      run: |
+        set -euo pipefail
+
+        # trim leading/trailing whitespace from a single line
+        trim() {
+          local s="$1"
+          s="${s#"${s%%[![:space:]]*}"}"
+          s="${s%"${s##*[![:space:]]}"}"
+          printf '%s' "$s"
+        }
+
+        if [ -z "$(trim "$DEPLOY_SCOPE")" ]; then
+          echo "::error::'scope' is required for cloud-deploy."
+          exit 1
+        fi
+
+        ARGS=(deploy)
+
+        NAME=$(trim "$DEPLOY_NAME")
+        [ -n "$NAME" ] && ARGS+=(--name "$NAME")
+
+        ARGS+=(--scope "$(trim "$DEPLOY_SCOPE")")
+
+        # Expand the multiline `deploy_packages` input into one --package flag per line.
+        PKG_COUNT=0
+        while IFS= read -r line || [ -n "$line" ]; do
+          line=$(trim "$line")
+          [ -z "$line" ] && continue
+          ARGS+=(--package "$line")
+          PKG_COUNT=$((PKG_COUNT + 1))
+        done <<< "$DEPLOY_PACKAGES"
+
+        if [ "$PKG_COUNT" -eq 0 ]; then
+          echo "::error::No packages provided. 'deploy_packages' must contain at least one [repo:]scope/name[@version] line."
+          exit 1
+        fi
+
+        if [ "$(trim "$DEPLOY_API")" = "true" ]; then
+          ARGS+=(--api true)
+        fi
+
+        ARGS+=(--version "$(trim "$DEPLOY_VERSION")")
+        ARGS+=(--size "$(trim "$DEPLOY_SIZE")")
+        ARGS+=(--timeout "$(trim "$DEPLOY_TIMEOUT")")
+
+        # Expand the multiline `env` input into one --env flag per line.
+        while IFS= read -r line || [ -n "$line" ]; do
+          line=$(trim "$line")
+          [ -z "$line" ] && continue
+          ARGS+=(--env "$line")
+        done <<< "$DEPLOY_ENV"
+
+        ARGS+=(--apiUrl "$(trim "$DEPLOY_API_URL")")
+
+        echo "Running: aux4 aux4 cloud ${ARGS[*]}"
+        aux4 aux4 cloud "${ARGS[@]}"

@@ -4,7 +4,7 @@
 
 <h1 align="center">aux4</h1>
 
-<p align="center">GitHub Action to lint, test, and publish <a href="https://aux4.io">aux4</a> packages.</p>
+<p align="center">GitHub Action to lint, test, publish, and cloud-deploy <a href="https://aux4.io">aux4</a> packages.</p>
 
 ## Usage
 
@@ -97,13 +97,62 @@ Builds, publishes to hub.aux4.io, and creates a GitHub release.
 | `scope` | The package scope |
 | `name` | The package name |
 
+### cloud-deploy
+
+Deploys one or more packages to [aux4.cloud](https://aux4.cloud) by wrapping `aux4 aux4 cloud deploy`. Works with any hub package — including third-party ones — with no publish required.
+
+```yaml
+- uses: aux4/action@v1
+  with:
+    command: cloud-deploy
+    scope: myscope
+    machine: mymachine
+    deploy_packages: |
+      private:myscope/api
+      aux4/config
+    env: |
+      LOG_LEVEL=info
+    aux4_token: ${{ secrets.AUX4_CLOUD_TOKEN }}
+```
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `scope` | Target scope for the deployment | *required* |
+| `machine` | Machine (VM) name; defaults to the package name for a single package | |
+| `deploy_packages` | Packages to deploy, one per line: `[<repository>:]<scope>/<name>[@<version>]` (default repo `public`; prefix `private:` / `system:`) | *required* |
+| `version` | Default version for packages given without `@version` | `latest` |
+| `size` | Machine size (`xs`, `sm`, `md`, `lg`, `xl`) | `sm` |
+| `timeout` | Lambda timeout in seconds | `120` |
+| `api` | Deploy as an HTTP API behind an API Gateway (one package only) | `false` |
+| `env` | Environment variables, one `NAME=value` per line | |
+| `api_url` | Cloud API base URL | `https://api.aux4.cloud` |
+
+**Authentication** — provide **either** `aux4_token` (a raw access token, as a secret) **or** `client_id` + `client_secret` (minted via `client_credentials`).
+
+> **Note:** the `client_credentials` path is not usable yet — the aux4.cloud API authorizes deploys by user membership, not by a token's `scope` claim, so machine tokens are rejected. Use `aux4_token` until that lands.
+
+Chain it after `publish`, or run it standalone:
+
+```yaml
+deploy:
+  needs: publish
+  runs-on: ubuntu-latest
+  steps:
+    - uses: aux4/action@v1
+      with:
+        command: cloud-deploy
+        scope: myscope
+        deploy_packages: myscope/mypackage
+        aux4_token: ${{ secrets.AUX4_CLOUD_TOKEN }}
+```
+
 ## Common Inputs
 
 These inputs work with all commands:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `command` | Command to run: `lint`, `test`, or `publish` | *required* |
+| `command` | Command to run: `lint`, `test`, `publish`, or `cloud-deploy` | *required* |
 | `working_directory` | Working directory containing the repository | `.` |
 | `package_directory` | Directory containing the `.aux4` file | `package` |
 | `system_packages` | Space-separated system packages to install (apt/brew) | |
