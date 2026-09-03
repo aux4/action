@@ -129,7 +129,7 @@ Deploys one or more packages to [aux4.cloud](https://aux4.cloud) by wrapping `au
 
 **Authentication** — provide **either** `aux4_token` (a raw access token, as a secret) **or** `client_id` + `client_secret` (minted via `client_credentials`).
 
-> **Note:** the `client_credentials` path is not usable yet — the aux4.cloud API authorizes deploys by user membership, not by a token's `scope` claim, so machine tokens are rejected. Use `aux4_token` until that lands.
+> **Note:** for the `client_credentials` path, the OAuth client must be granted both the `cloud:deploy` scope and the target deployment scope (e.g. `myscope`). The action mints the token requesting `cloud:deploy <scope>`; the cloud API authorizes the deploy from the token's `scopes` claim. Alternatively use `aux4_token` (a user access token for a member of the scope).
 
 Chain it after `publish`, or run it standalone:
 
