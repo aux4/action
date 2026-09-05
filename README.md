@@ -85,9 +85,26 @@ Builds, publishes to hub.aux4.io, and creates a GitHub release.
 | Input | Description | Default |
 |-------|-------------|---------|
 | `level` | Release level (`patch`, `minor`, `major`) | `patch` |
-| `aux4_token` | aux4 access token for hub.aux4.io | *required* |
+| `aux4_token` | aux4 access token for the target hub | *required* |
 | `github_token` | GitHub token for creating releases | *required* |
 | `aux4_image` | Docker image for aux4 | `aux4/aux4:latest` |
+| `registry` | Full hub registry URL to publish to (e.g. `https://dev.api.hub.aux4.io/v1/packages`). Empty = default prod hub. | |
+
+#### Publishing to the dev hub
+
+By default the action publishes to the production hub (`hub.aux4.io`). Set `registry` to a full registry URL to publish elsewhere — for example, a branch-aware workflow can publish to the **dev hub** from the `dev` branch:
+
+```yaml
+- uses: aux4/action@v1
+  with:
+    command: publish
+    level: patch
+    registry: ${{ github.ref_name == 'dev' && 'https://dev.api.hub.aux4.io/v1/packages' || '' }}
+    aux4_token: ${{ secrets.AUX4_ACCESS_TOKEN }}
+    github_token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+`registry` only affects the publish container — the token you pass in `aux4_token` is sent to that registry as-is, so it must be a token valid for that hub. The action's own tooling (pkger, render) is always installed from the prod hub, regardless of `registry`. When `registry` is empty the behavior is identical to publishing to the prod hub.
 
 #### Outputs
 

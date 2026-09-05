@@ -78,6 +78,10 @@ inputs:
     description: '[publish] Docker image for aux4'
     required: false
     default: 'aux4/aux4:latest'
+  registry:
+    description: '[publish] Full hub registry URL to publish to (e.g. https://dev.api.hub.aux4.io/v1/packages). Empty = default prod hub. Only affects the publish container; host tooling always installs from the prod hub.'
+    required: false
+    default: ''
 
   # Cloud Deploy
   scope:
@@ -404,9 +408,21 @@ runs:
       if: inputs.command == 'publish'
       shell: bash
       working-directory: ${{ inputs.working_directory }}
+      env:
+        AUX4_REGISTRY_URL: ${{ inputs.registry }}
       run: |
+        # Forward the target registry into the publish container ONLY when set.
+        # The host tooling install steps are left untouched so pkger/render keep
+        # resolving from the prod hub; an empty registry means "default prod hub".
+        REGISTRY_ENV=()
+        if [ -n "$AUX4_REGISTRY_URL" ]; then
+          REGISTRY_ENV=(-e AUX4_REGISTRY_URL="$AUX4_REGISTRY_URL")
+          echo "::notice::Building against registry ${AUX4_REGISTRY_URL}"
+        fi
+
         docker run --rm \
           --user $(id -u):$(id -g) \
+          "${REGISTRY_ENV[@]}" \
           -v $(pwd):/workspace \
           -w /workspace \
           ${{ inputs.aux4_image }} \
@@ -418,6 +434,7 @@ runs:
       working-directory: ${{ inputs.working_directory }}
       env:
         AUX4_ACCESS_TOKEN: ${{ inputs.aux4_token }}
+        AUX4_REGISTRY_URL: ${{ inputs.registry }}
       run: |
         SCOPE="${{ steps.current.outputs.scope }}"
         NAME="${{ steps.current.outputs.name }}"
@@ -433,11 +450,22 @@ runs:
           echo "::notice::Publishing ${SCOPE}/${NAME} to the PRIVATE repository"
         fi
 
+        # Forward the target registry into the publish container ONLY when set.
+        # pkger sends the provided AUX4_ACCESS_TOKEN as-is to this registry, which
+        # validates it — no SSO URL is needed inside the container. Empty means the
+        # container's default (prod hub), so behavior is unchanged when unset.
+        REGISTRY_ENV=()
+        if [ -n "$AUX4_REGISTRY_URL" ]; then
+          REGISTRY_ENV=(-e AUX4_REGISTRY_URL="$AUX4_REGISTRY_URL")
+          echo "::notice::Publishing ${SCOPE}/${NAME} to registry ${AUX4_REGISTRY_URL}"
+        fi
+
         docker run --rm \
           --user $(id -u):$(id -g) \
           -v $(pwd):/workspace \
           -w /workspace \
           -e AUX4_ACCESS_TOKEN="${AUX4_ACCESS_TOKEN}" \
+          "${REGISTRY_ENV[@]}" \
           --entrypoint sh \
           ${{ inputs.aux4_image }} \
           -c "aux4 aux4 pkger publish ${REPO_ARG}\"${PACKAGE_FILE}\""
