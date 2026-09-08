@@ -112,6 +112,10 @@ inputs:
     description: '[cloud-deploy] Deploy as an HTTP API behind an API Gateway (requires exactly one package)'
     required: false
     default: 'false'
+  product:
+    description: "[cloud-deploy] Public domain the machine is served under: 'cloud' (default), 'app', or 'agent'"
+    required: false
+    default: ''
   env:
     description: '[cloud-deploy] Environment variables to set on the machine, one NAME=value per line'
     required: false
@@ -581,6 +585,7 @@ runs:
         DEPLOY_SIZE: ${{ inputs.size }}
         DEPLOY_TIMEOUT: ${{ inputs.timeout }}
         DEPLOY_API: ${{ inputs.api }}
+        DEPLOY_PRODUCT: ${{ inputs.product }}
         DEPLOY_ENV: ${{ inputs.env }}
         DEPLOY_API_URL: ${{ inputs.api_url }}
       run: |
@@ -623,6 +628,9 @@ runs:
         if [ "$(trim "$DEPLOY_API")" = "true" ]; then
           ARGS+=(--api true)
         fi
+
+        PRODUCT=$(trim "$DEPLOY_PRODUCT")
+        [ -n "$PRODUCT" ] && ARGS+=(--product "$PRODUCT")
 
         ARGS+=(--version "$(trim "$DEPLOY_VERSION")")
         ARGS+=(--size "$(trim "$DEPLOY_SIZE")")
