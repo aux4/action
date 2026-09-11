@@ -360,11 +360,13 @@ runs:
         NAME=$(jq -r '.name' "$PACKAGE_AUX4")
         CURRENT_VERSION=$(jq -r '.version' "$PACKAGE_AUX4")
         PRIVATE=$(jq -r '.private // false' "$PACKAGE_AUX4")
+        REPOSITORY=$(jq -r '.repository // ""' "$PACKAGE_AUX4")
         echo "scope=${SCOPE}" >> $GITHUB_OUTPUT
         echo "name=${NAME}" >> $GITHUB_OUTPUT
         echo "current_version=${CURRENT_VERSION}" >> $GITHUB_OUTPUT
         echo "private=${PRIVATE}" >> $GITHUB_OUTPUT
-        echo "::notice::Found package ${SCOPE}/${NAME} at version ${CURRENT_VERSION} (private: ${PRIVATE})"
+        echo "repository=${REPOSITORY}" >> $GITHUB_OUTPUT
+        echo "::notice::Found package ${SCOPE}/${NAME} at version ${CURRENT_VERSION} (private: ${PRIVATE}, repository: ${REPOSITORY:-<none>})"
 
     - name: Increment version
       if: inputs.command == 'publish'
@@ -447,9 +449,16 @@ runs:
 
         AUX4_ACCESS_TOKEN=$(echo -n "$AUX4_ACCESS_TOKEN" | tr -d '[:space:]')
 
-        # Route private packages to the "private" repository (pkger defaults to "public")
+        # Route by an explicit .repository if the package declares one (e.g. "system"),
+        # else fall back to .private -> the "private" repository, else public (pkger
+        # defaults to "public"). Without this an internal repository:system package
+        # would leak to the PUBLIC hub (only .private was honored before).
         REPO_ARG=""
-        if [ "${{ steps.current.outputs.private }}" = "true" ]; then
+        REPOSITORY="${{ steps.current.outputs.repository }}"
+        if [ -n "$REPOSITORY" ]; then
+          REPO_ARG="--repository ${REPOSITORY} "
+          echo "::notice::Publishing ${SCOPE}/${NAME} to the ${REPOSITORY} repository"
+        elif [ "${{ steps.current.outputs.private }}" = "true" ]; then
           REPO_ARG="--repository private "
           echo "::notice::Publishing ${SCOPE}/${NAME} to the PRIVATE repository"
         fi
