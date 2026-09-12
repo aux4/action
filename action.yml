@@ -334,6 +334,7 @@ runs:
     - name: Configure git
       if: inputs.command == 'publish'
       shell: bash
+      working-directory: ${{ inputs.working_directory }}
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
