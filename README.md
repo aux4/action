@@ -143,6 +143,7 @@ Deploys one or more packages to [aux4.cloud](https://aux4.cloud) by wrapping `au
 | `api` | Deploy as an HTTP API behind an API Gateway (one package only) | `false` |
 | `env` | Environment variables, one `NAME=value` per line | |
 | `api_url` | Cloud API base URL | `https://api.aux4.cloud` |
+| `cloud_registry_url` | Optional registry used only to install the `aux4/cloud` deploy client | production hub |
 
 **Authentication** — provide **either** `aux4_token` (a raw access token, as a secret) **or** `client_id` + `client_secret` (minted via `client_credentials`).
 

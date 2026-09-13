@@ -124,6 +124,10 @@ inputs:
     description: '[cloud-deploy] Cloud API base URL'
     required: false
     default: 'https://api.aux4.cloud'
+  cloud_registry_url:
+    description: '[cloud-deploy] Optional package registry used only to install the aux4/cloud deploy client'
+    required: false
+    default: ''
   client_id:
     description: '[cloud-deploy] OAuth client id to mint a token via the client_credentials grant (see README — cloud:deploy machine tokens are not accepted by the cloud API yet)'
     required: false
@@ -541,6 +545,8 @@ runs:
     - name: Install aux4/cloud
       if: inputs.command == 'cloud-deploy'
       shell: bash
+      env:
+        AUX4_REGISTRY_URL: ${{ inputs.cloud_registry_url }}
       run: |
         aux4 aux4 pkger install aux4/cloud
 
