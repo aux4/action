@@ -82,6 +82,14 @@ inputs:
     description: '[publish] Full hub registry URL to publish to (e.g. https://dev.api.hub.aux4.io/v1/packages). Empty = default prod hub. Only affects the publish container; host tooling always installs from the prod hub.'
     required: false
     default: ''
+  expected_source_sha:
+    description: '[publish] Reviewed source commit expected on the remote branch. Used only with strict_lineage=true.'
+    required: false
+    default: ''
+  strict_lineage:
+    description: '[publish] Refuse branch drift and skip the automatic pull; requires expected_source_sha and allows only generated package assets after that commit.'
+    required: false
+    default: 'false'
 
   # Cloud Deploy
   scope:
@@ -342,8 +350,23 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
+    - name: Verify strict publish source lineage
+      if: inputs.command == 'publish' && inputs.strict_lineage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        PUBLISH_REF: ${{ github.ref_name }}
+      run: |
+        set -euo pipefail
+        if [ -z "$EXPECTED_SOURCE_SHA" ]; then
+          echo "::error::strict_lineage requires expected_source_sha"
+          exit 1
+        fi
+        "${GITHUB_ACTION_PATH}/scripts/verify-source-lineage.sh" "$EXPECTED_SOURCE_SHA" "$PUBLISH_REF"
+
     - name: Pull latest changes
-      if: inputs.command == 'publish'
+      if: inputs.command == 'publish' && inputs.strict_lineage != 'true'
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
