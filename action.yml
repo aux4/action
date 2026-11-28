@@ -82,6 +82,18 @@ inputs:
     description: '[publish] Full hub registry URL to publish to (e.g. https://dev.api.hub.aux4.io/v1/packages). Empty = default prod hub. Only affects the publish container; host tooling always installs from the prod hub.'
     required: false
     default: ''
+  expected_source_sha:
+    description: '[publish] Reviewed source commit expected on the remote branch. Used only with strict_lineage=true.'
+    required: false
+    default: ''
+  strict_lineage:
+    description: '[publish] Refuse branch drift and skip the automatic pull; requires expected_source_sha and allows only generated package assets after that commit.'
+    required: false
+    default: 'false'
+  allow_generated_commit:
+    description: '[publish] Strict mode only: allow a reviewed generated-asset commit descended from expected_source_sha. Default requires exact HEAD.'
+    required: false
+    default: 'false'
 
   # Cloud Deploy
   scope:
@@ -338,8 +350,24 @@ runs:
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
 
+    - name: Verify strict publish source lineage
+      if: inputs.command == 'publish' && inputs.strict_lineage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        PUBLISH_REF: ${{ github.ref_name }}
+        ALLOW_GENERATED_COMMIT: ${{ inputs.allow_generated_commit }}
+      run: |
+        set -euo pipefail
+        if [ -z "$EXPECTED_SOURCE_SHA" ]; then
+          echo "::error::strict_lineage requires expected_source_sha"
+          exit 1
+        fi
+        "${GITHUB_ACTION_PATH}/scripts/verify-source-lineage.sh" "$EXPECTED_SOURCE_SHA" "$PUBLISH_REF" "$ALLOW_GENERATED_COMMIT"
+
     - name: Pull latest changes
-      if: inputs.command == 'publish'
+      if: inputs.command == 'publish' && inputs.strict_lineage != 'true'
       shell: bash
       working-directory: ${{ inputs.working_directory }}
       run: |
@@ -404,11 +432,18 @@ runs:
 
         echo "::notice::Version bumped from ${CURRENT_VERSION} to ${NEW_VERSION}"
 
-    - name: Pull latest aux4 image
+    - name: Pull publisher image
       if: inputs.command == 'publish'
       shell: bash
+      env:
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
+        STRICT_LINEAGE: ${{ inputs.strict_lineage }}
       run: |
-        docker pull ${{ inputs.aux4_image }}
+        if [[ "$STRICT_LINEAGE" == true && ! "$AUX4_IMAGE" =~ ^aux4/aux4@sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::Strict publication requires an aux4/aux4 image pinned by digest"
+          exit 1
+        fi
+        docker pull "$AUX4_IMAGE"
 
     - name: Build package for publishing
       if: inputs.command == 'publish'
@@ -416,6 +451,7 @@ runs:
       working-directory: ${{ inputs.working_directory }}
       env:
         AUX4_REGISTRY_URL: ${{ inputs.registry }}
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
       run: |
         # Forward the target registry into the publish container ONLY when set.
         # The host tooling install steps are left untouched so pkger/render keep
@@ -431,8 +467,16 @@ runs:
           "${REGISTRY_ENV[@]}" \
           -v $(pwd):/workspace \
           -w /workspace \
-          ${{ inputs.aux4_image }} \
+          "$AUX4_IMAGE" \
           aux4 pkger build ${{ inputs.package_directory }}
+
+    - name: Verify final package archive against the release manifest
+      if: inputs.command == 'publish' && inputs.strict_lineage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/verify-package-archive.py" "$PACKAGE_DIRECTORY"
 
     - name: Publish to hub.aux4.io
       if: inputs.command == 'publish'
@@ -441,6 +485,7 @@ runs:
       env:
         AUX4_ACCESS_TOKEN: ${{ inputs.aux4_token }}
         AUX4_REGISTRY_URL: ${{ inputs.registry }}
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
       run: |
         SCOPE="${{ steps.current.outputs.scope }}"
         NAME="${{ steps.current.outputs.name }}"
@@ -480,7 +525,7 @@ runs:
           -e AUX4_ACCESS_TOKEN="${AUX4_ACCESS_TOKEN}" \
           "${REGISTRY_ENV[@]}" \
           --entrypoint sh \
-          ${{ inputs.aux4_image }} \
+          "$AUX4_IMAGE" \
           -c "aux4 aux4 pkger publish ${REPO_ARG}\"${PACKAGE_FILE}\""
 
     - name: Commit and tag
