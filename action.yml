@@ -432,11 +432,18 @@ runs:
 
         echo "::notice::Version bumped from ${CURRENT_VERSION} to ${NEW_VERSION}"
 
-    - name: Pull latest aux4 image
+    - name: Pull publisher image
       if: inputs.command == 'publish'
       shell: bash
+      env:
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
+        STRICT_LINEAGE: ${{ inputs.strict_lineage }}
       run: |
-        docker pull ${{ inputs.aux4_image }}
+        if [[ "$STRICT_LINEAGE" == true && ! "$AUX4_IMAGE" =~ ^aux4/aux4@sha256:[0-9a-f]{64}$ ]]; then
+          echo "::error::Strict publication requires an aux4/aux4 image pinned by digest"
+          exit 1
+        fi
+        docker pull "$AUX4_IMAGE"
 
     - name: Build package for publishing
       if: inputs.command == 'publish'
@@ -444,6 +451,7 @@ runs:
       working-directory: ${{ inputs.working_directory }}
       env:
         AUX4_REGISTRY_URL: ${{ inputs.registry }}
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
       run: |
         # Forward the target registry into the publish container ONLY when set.
         # The host tooling install steps are left untouched so pkger/render keep
@@ -459,7 +467,7 @@ runs:
           "${REGISTRY_ENV[@]}" \
           -v $(pwd):/workspace \
           -w /workspace \
-          ${{ inputs.aux4_image }} \
+          "$AUX4_IMAGE" \
           aux4 pkger build ${{ inputs.package_directory }}
 
     - name: Verify final package archive against the release manifest
@@ -477,6 +485,7 @@ runs:
       env:
         AUX4_ACCESS_TOKEN: ${{ inputs.aux4_token }}
         AUX4_REGISTRY_URL: ${{ inputs.registry }}
+        AUX4_IMAGE: ${{ inputs.aux4_image }}
       run: |
         SCOPE="${{ steps.current.outputs.scope }}"
         NAME="${{ steps.current.outputs.name }}"
@@ -516,7 +525,7 @@ runs:
           -e AUX4_ACCESS_TOKEN="${AUX4_ACCESS_TOKEN}" \
           "${REGISTRY_ENV[@]}" \
           --entrypoint sh \
-          ${{ inputs.aux4_image }} \
+          "$AUX4_IMAGE" \
           -c "aux4 aux4 pkger publish ${REPO_ARG}\"${PACKAGE_FILE}\""
 
     - name: Commit and tag

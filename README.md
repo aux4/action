@@ -87,7 +87,7 @@ Builds, publishes to hub.aux4.io, and creates a GitHub release.
 | `level` | Release level (`patch`, `minor`, `major`) | `patch` |
 | `aux4_token` | aux4 access token for the target hub | *required* |
 | `github_token` | GitHub token for creating releases | *required* |
-| `aux4_image` | Docker image for aux4 | `aux4/aux4:latest` |
+| `aux4_image` | Docker image for aux4. Strict publication requires a verified <code>aux4/aux4@sha256:&lt;digest&gt;</code> reference for both build and upload. | `aux4/aux4:latest` |
 | `registry` | Full hub registry URL to publish to (e.g. `https://dev.api.hub.aux4.io/v1/packages`). Empty = default prod hub. | |
 
 #### Publishing to the dev hub
