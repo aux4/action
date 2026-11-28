@@ -462,6 +462,14 @@ runs:
           ${{ inputs.aux4_image }} \
           aux4 pkger build ${{ inputs.package_directory }}
 
+    - name: Verify final package archive against the release manifest
+      if: inputs.command == 'publish' && inputs.strict_lineage == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      env:
+        PACKAGE_DIRECTORY: ${{ inputs.package_directory }}
+      run: python3 "$GITHUB_ACTION_PATH/scripts/verify-package-archive.py" "$PACKAGE_DIRECTORY"
+
     - name: Publish to hub.aux4.io
       if: inputs.command == 'publish'
       shell: bash
